@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0] — 2026-05-02
+
+### Added
+- **Multi-file source structure** — `src/Client.php` is now a thin facade. Logic is split into:
+  - `src/Http/HttpClient.php` — all cURL communication, URL building, auth headers
+  - `src/Resources/TextResource.php` — Gemini text generation
+  - `src/Resources/ImageResource.php` — Imagen image generation
+  - `src/Resources/AudioResource.php` — Text-to-Speech synthesis
+  - `src/Resources/VideoResource.php` — Veo video generation and operation polling
+  - `src/Resources/ClaudeResource.php` — Anthropic Claude messages
+  - `src/Resources/FileResource.php` — file handling (see below)
+  - `src/Support/MimeTypes.php` — MIME type detection and extension mapping
+- **Resource API** — all capabilities accessible as typed properties on `Client`:
+  `$client->text`, `$client->images`, `$client->audio`, `$client->video`, `$client->claude`, `$client->files`
+- **`FileResource::withFile()`** — reads a local file, base64-encodes it as `inlineData`, and returns a ready-to-use `contents` array for `generateContent()`. MIME type is auto-detected via `finfo`.
+- **`FileResource::withFiles()`** — same as `withFile()` but accepts multiple files in a single request.
+- **`FileResource::uploadFile()`** — uploads a local file to the Gemini File API via a two-step resumable upload. Returns a file URI valid for 48 hours, usable across multiple requests.
+- **`FileResource::fromUri()`** — convenience builder that wraps an existing File API URI into a `contents` array.
+- **`FileResource::listFiles()`** — list files previously uploaded to the File API.
+- **`FileResource::getFile()`** — get metadata for a specific uploaded file.
+- **`MimeTypes::detect()`** — auto-detects MIME type from file magic bytes via `finfo`, with extension-based fallback.
+- `ext-fileinfo` added to `composer.json` requirements (used for MIME detection).
+- PHP minimum version bumped to `8.1` (required for `readonly` properties).
+
+### Changed
+- All legacy flat methods on `Client` (`generateContent`, `generateImage`, `synthesizeSpeech`, `generateVideo`, `getOperation`, `claudeMessages`, `predict`) are fully preserved and delegate to the new resource classes — **no breaking changes**.
+- `composer.json` description and keywords updated to reflect file upload and multimodal support.
+
+---
+
 ## [0.4.0] — 2026-05-02
 
 ### Added
