@@ -59,7 +59,7 @@ class MimeTypes
         if (\function_exists('finfo_open')) {
             $finfo = \finfo_open(FILEINFO_MIME_TYPE);
             $mime  = \finfo_file($finfo, $filePath);
-            \finfo_close($finfo);
+            // finfo_close() is deprecated since PHP 8.5 — the object is freed automatically
 
             if ($mime && $mime !== 'application/octet-stream') {
                 return $mime;
