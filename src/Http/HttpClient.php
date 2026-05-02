@@ -143,9 +143,16 @@ class HttpClient
     /**
      * GET a URL and return a decoded JSON array.
      * Used for polling long-running operations.
+     * Appends the API key as a query parameter when in Express Mode.
      */
     public function get(string $url): array
     {
+        // Append API key for Express Mode (Cloud Mode uses the Authorization header)
+        if ($this->apiKey) {
+            $sep = \str_contains($url, '?') ? '&' : '?';
+            $url .= "{$sep}key={$this->apiKey}";
+        }
+
         $headers  = $this->buildHeaders();
         $raw      = $this->execute($url, $headers, null, 'GET');
         $decoded  = \json_decode($raw, true);
