@@ -1,5 +1,5 @@
 {
-    "name": "fabianternis/google-agent-platform-php",
+    "name": "fabianternis/google-agent-platform",
     "description": "A lightweight, dependency-free PHP wrapper for the Google Gemini Enterprise Agent Platform.",
     "type": "library",
     "license": "Apache-2.0",
