@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0] — 2026-05-02
+
+### Fixed
+- **Streaming was broken** — `streamGenerateContent()` and `claude->messages(stream: true)` both
+  previously went through the same `json_decode` path as non-streaming requests, producing garbled
+  or errored responses. `HttpClient::stream()` now uses `CURLOPT_WRITEFUNCTION` to process
+  newline-delimited JSON chunks (SSE) incrementally without buffering the full response. Handles
+  `data:` prefix and `[DONE]` sentinel correctly.
+- **`getOperation()` ignored API key in Express Mode** — `HttpClient::get()` now appends
+  `?key=` when `$apiKey` is set, so polling long-running Veo operations works in Express Mode.
+- **`FileResource::getFile()` fragile URL construction** — replaced `str_replace('files/', '')`
+  with `str_starts_with()` + `substr()`. Now correctly handles `'files/abc123'`,
+  `'/files/abc123'`, and bare `'abc123'`.
+- **`finfo_close()` deprecated in PHP 8.5** — removed the call from `MimeTypes::detect()`;
+  the `finfo` object is freed automatically.
+
+### Added
+- **`TextResource::generate()` / `stream()`** now accept `$systemInstruction` (system prompt)
+  and `$generationConfig` (temperature, maxOutputTokens, topP, responseMimeType, etc.).
+  Both are also wired into the legacy `generateContent()` / `streamGenerateContent()` on `Client`.
+- **`FileResource::deleteFile()`** — delete an uploaded file from the File API by resource name
+  (`'files/abc123'`, `'/files/abc123'`, or bare `'abc123'`).
+- **`HttpClient::delete()`** — new DELETE method used by `deleteFile()`, appends API key in
+  Express Mode.
+- **Typed exception hierarchy** under `GoogleAgentPlatform\Exceptions\`:
+  - `AgentPlatformException` — base class (extends `\RuntimeException`)
+  - `ApiException` — API 4xx/5xx errors, exposes `getHttpCode()`
+  - `AuthException` — 401/403 errors (extends `ApiException`)
+  - `FileNotFoundException` — local file not found (extends `AgentPlatformException`)
+  - `HttpClient` now throws `ApiException` / `AuthException` instead of `\RuntimeException`.
+  - `FileResource` now throws `FileNotFoundException` instead of `\InvalidArgumentException`.
+- **Chunked file upload** — `FileResource::uploadBytes()` now uses `CURLOPT_PUT` +
+  `CURLOPT_INFILE` to stream the file from disk in chunks, avoiding loading the entire file
+  into memory with `file_get_contents()`.
+- **`TextResource::stream()` callback API** — accepts an optional `$onChunk` callable;
+  collects and returns all chunks when no callback is provided.
+- **`ClaudeResource::messages()` streaming** — accepts optional `$onChunk` callable;
+  routes `stream: true` through `HttpClient::stream()` instead of the JSON-decode path.
+- **PHPUnit test suite** — 59 tests, 178 assertions, all passing:
+  - `tests/Unit/ClientTest.php`
+  - `tests/Unit/HttpClientTest.php`
+  - `tests/Unit/TextResourceTest.php`
+  - `tests/Unit/ImageResourceTest.php`
+  - `tests/Unit/AudioResourceTest.php`
+  - `tests/Unit/VideoResourceTest.php`
+  - `tests/Unit/ClaudeResourceTest.php`
+  - `tests/Unit/FileResourceTest.php`
+  - `tests/Unit/MimeTypesTest.php`
+  - `tests/Unit/ExceptionsTest.php`
+
+### Changed
+- `Client::predict()` no longer uses `ReflectionProperty` to access `HttpClient` — a direct
+  `$this->http` reference is stored instead.
+- `Client::generateContent()` and `Client::streamGenerateContent()` signatures extended with
+  optional `$systemInstruction` and `$generationConfig` parameters (fully backward-compatible).
+- `phpunit/phpunit ^11.0` added to `require-dev`; `phpunit.xml` config added.
+
+---
+
 ## [0.5.0] — 2026-05-02
 
 ### Added

@@ -43,6 +43,48 @@ class TextResourceTest extends TestCase
         (new TextResource($http))->generate([], 'gemini-3.1-pro-preview');
     }
 
+    public function test_generate_includes_system_instruction(): void
+    {
+        $http = $this->makeHttpMock();
+        $http->expects($this->once())
+            ->method('request')
+            ->with($this->anything(), $this->anything(), $this->callback(function (array $payload): bool {
+                return isset($payload['systemInstruction']['parts'][0]['text'])
+                    && $payload['systemInstruction']['parts'][0]['text'] === 'You are a helpful assistant.';
+            }))
+            ->willReturn([]);
+
+        (new TextResource($http))->generate([], systemInstruction: 'You are a helpful assistant.');
+    }
+
+    public function test_generate_includes_generation_config(): void
+    {
+        $http = $this->makeHttpMock();
+        $http->expects($this->once())
+            ->method('request')
+            ->with($this->anything(), $this->anything(), $this->callback(function (array $payload): bool {
+                return isset($payload['generationConfig']['temperature'])
+                    && $payload['generationConfig']['temperature'] === 0.5
+                    && $payload['generationConfig']['maxOutputTokens'] === 512;
+            }))
+            ->willReturn([]);
+
+        (new TextResource($http))->generate([], generationConfig: ['temperature' => 0.5, 'maxOutputTokens' => 512]);
+    }
+
+    public function test_generate_omits_system_instruction_when_null(): void
+    {
+        $http = $this->makeHttpMock();
+        $http->expects($this->once())
+            ->method('request')
+            ->with($this->anything(), $this->anything(), $this->callback(
+                fn($p) => !isset($p['systemInstruction'])
+            ))
+            ->willReturn([]);
+
+        (new TextResource($http))->generate([]);
+    }
+
     public function test_stream_calls_http_stream(): void
     {
         $http = $this->makeHttpMock();

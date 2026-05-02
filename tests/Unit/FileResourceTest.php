@@ -4,6 +4,7 @@ namespace GoogleAgentPlatform\Tests\Unit;
 
 use GoogleAgentPlatform\Http\HttpClient;
 use GoogleAgentPlatform\Resources\FileResource;
+use GoogleAgentPlatform\Exceptions\FileNotFoundException;
 use PHPUnit\Framework\TestCase;
 
 class FileResourceTest extends TestCase
@@ -47,7 +48,7 @@ class FileResourceTest extends TestCase
 
     public function test_with_file_throws_for_missing_file(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(FileNotFoundException::class);
         $this->expectExceptionMessageMatches('/File not found/');
 
         $this->makeResource()->withFile('/nonexistent/path/file.jpg', 'test');
@@ -98,7 +99,7 @@ class FileResourceTest extends TestCase
 
     public function test_with_files_throws_for_missing_file(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(FileNotFoundException::class);
         $this->makeResource()->withFiles(['/no/such/file.png'], 'test');
     }
 
@@ -142,5 +143,43 @@ class FileResourceTest extends TestCase
 
         $this->assertSame($url1, $url2);
         $this->assertStringContainsString('/files/abc123', $url1);
+    }
+
+    // -------------------------------------------------------------------------
+    // deleteFile()
+    // -------------------------------------------------------------------------
+
+    public function test_delete_file_calls_http_delete(): void
+    {
+        $http = $this->createMock(HttpClient::class);
+        $http->method('buildFileApiUrl')->willReturn('https://example.com/files/abc123?key=k');
+        $http->expects($this->once())->method('delete');
+
+        $resource = new FileResource($http);
+        $resource->deleteFile('files/abc123');
+    }
+
+    public function test_delete_file_normalises_name_with_prefix(): void
+    {
+        $http = $this->createMock(HttpClient::class);
+        $http->expects($this->once())
+            ->method('buildFileApiUrl')
+            ->with('/abc123')
+            ->willReturn('https://example.com/files/abc123');
+        $http->method('delete');
+
+        (new FileResource($http))->deleteFile('files/abc123');
+    }
+
+    public function test_delete_file_normalises_bare_id(): void
+    {
+        $http = $this->createMock(HttpClient::class);
+        $http->expects($this->once())
+            ->method('buildFileApiUrl')
+            ->with('/abc123')
+            ->willReturn('https://example.com/files/abc123');
+        $http->method('delete');
+
+        (new FileResource($http))->deleteFile('abc123');
     }
 }

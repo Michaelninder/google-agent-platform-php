@@ -4,6 +4,7 @@ namespace GoogleAgentPlatform\Resources;
 
 use GoogleAgentPlatform\Http\HttpClient;
 use GoogleAgentPlatform\Support\MimeTypes;
+use GoogleAgentPlatform\Exceptions\FileNotFoundException;
 
 /**
  * File handling — local file embedding and File API uploads.
@@ -51,7 +52,7 @@ class FileResource
         string  $role     = 'user'
     ): array {
         if (!\file_exists($filePath)) {
-            throw new \InvalidArgumentException("File not found: {$filePath}");
+            throw new FileNotFoundException("File not found: {$filePath}");
         }
 
         $mimeType = $mimeType ?? MimeTypes::detect($filePath);
@@ -104,7 +105,7 @@ class FileResource
             }
 
             if (!\file_exists($filePath)) {
-                throw new \InvalidArgumentException("File not found: {$filePath}");
+                throw new FileNotFoundException("File not found: {$filePath}");
             }
 
             $mimeType = $mimeType ?? MimeTypes::detect($filePath);
@@ -175,7 +176,7 @@ class FileResource
         ?string $displayName = null
     ): array {
         if (!\file_exists($filePath)) {
-            throw new \InvalidArgumentException("File not found: {$filePath}");
+            throw new FileNotFoundException("File not found: {$filePath}");
         }
 
         $mimeType    = $mimeType ?? MimeTypes::detect($filePath);
@@ -248,6 +249,23 @@ class FileResource
         return $this->http->get($url);
     }
 
+    /**
+     * Delete an uploaded file from the File API.
+     *
+     * @param string $fileName  The file resource name, e.g. 'files/abc123' or just 'abc123'.
+     */
+    public function deleteFile(string $fileName): void
+    {
+        $name = \ltrim($fileName, '/');
+
+        if (\str_starts_with($name, 'files/')) {
+            $name = \substr($name, \strlen('files/'));
+        }
+
+        $url = $this->http->buildFileApiUrl('/' . $name);
+        $this->http->delete($url);
+    }
+
     // -------------------------------------------------------------------------
     // Internal upload helpers
     // -------------------------------------------------------------------------
@@ -309,11 +327,19 @@ class FileResource
 
     /**
      * Step 2: Upload the actual file bytes to the resumable upload URL.
+     *
+     * Uses CURLOPT_READFUNCTION to stream the file from disk in chunks,
+     * avoiding loading the entire file into memory at once.
+     *
      * Returns the file metadata from the API response.
      */
     private function uploadBytes(string $uploadUrl, string $filePath, string $mimeType, int $fileSize): array
     {
-        $fileBytes = \file_get_contents($filePath);
+        $fh = \fopen($filePath, 'rb');
+
+        if ($fh === false) {
+            throw new \RuntimeException("Could not open file for reading: {$filePath}");
+        }
 
         $headers = [
             "Content-Type: {$mimeType}",
@@ -325,13 +351,16 @@ class FileResource
         $ch = \curl_init();
         \curl_setopt($ch, CURLOPT_URL, $uploadUrl);
         \curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        \curl_setopt($ch, CURLOPT_POST, true);
-        \curl_setopt($ch, CURLOPT_POSTFIELDS, $fileBytes);
+        \curl_setopt($ch, CURLOPT_PUT, true);                    // PUT streams via READFUNCTION
+        \curl_setopt($ch, CURLOPT_INFILE, $fh);
+        \curl_setopt($ch, CURLOPT_INFILESIZE, $fileSize);
         \curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
         $response = \curl_exec($ch);
         $httpCode = \curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error    = \curl_error($ch);
+
+        \fclose($fh);
 
         if ($error) {
             throw new \RuntimeException("cURL Error during file upload: {$error}");
