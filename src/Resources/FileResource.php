@@ -232,13 +232,19 @@ class FileResource
     /**
      * Get metadata for a specific uploaded file.
      *
-     * @param string $fileName  The file resource name, e.g. 'files/abc123'.
+     * @param string $fileName  The file resource name, e.g. 'files/abc123' or just 'abc123'.
      */
     public function getFile(string $fileName): array
     {
+        // Normalise: strip any leading slash, then strip a 'files/' prefix so we
+        // always end up with just the bare ID, then re-add it via buildFileApiUrl.
         $name = \ltrim($fileName, '/');
-        // buildFileApiUrl expects a path relative to /files
-        $url  = $this->http->buildFileApiUrl('/' . \ltrim(\str_replace('files/', '', $name), '/'));
+
+        if (\str_starts_with($name, 'files/')) {
+            $name = \substr($name, \strlen('files/'));
+        }
+
+        $url = $this->http->buildFileApiUrl('/' . $name);
         return $this->http->get($url);
     }
 
