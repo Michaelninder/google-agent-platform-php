@@ -1,6 +1,10 @@
 # Google Agent Platform PHP SDK
 
-A lightweight, dependency-free PHP wrapper for the Google Gemini Enterprise Agent Platform. 
+A lightweight, dependency-free PHP wrapper for the **Google Agent Platform** (formerly known as **Vertex AI**). Google rebranded Vertex AI to "Agent Platform" to reflect its expanded focus on agentic AI workflows. All existing Vertex AI endpoints remain fully compatible.
+
+> **API Keys:** Manage your API keys at [https://console.cloud.google.com/agent-platform/studio/settings/api-keys](https://console.cloud.google.com/agent-platform/studio/settings/api-keys)
+
+---
 
 ## Quick Start
 
@@ -36,8 +40,8 @@ print_r($response);
 // Tip: Run `gcloud auth application-default print-access-token` locally to test
 $client = new Client([
     'project_id'   => 'YOUR_PROJECT_ID',
-    'access_token' => 'YOUR_ACCESS_TOKEN', 
-    'location'     => 'global' // Defaults to 'global'
+    'access_token' => 'YOUR_ACCESS_TOKEN',
+    'location'     => 'us-east5' // Required for Anthropic & Veo models
 ]);
 ```
 
@@ -65,27 +69,209 @@ $response = $client->streamGenerateContent(
 );
 ```
 
-### 4. Text-to-Speech (TTS) Integration
+---
 
-Google Agent Platform now acts as a hub for multiple publishers. The SDK automatically resolves third-party providers (like ElevenLabs) if you prefix the publisher name.
+## Anthropic Models (Claude on Agent Platform)
 
-**Available TTS Models:**
-* `gemini-3.1-flash-tts-preview`
-* `gemini-2.5-pro-tts`
-* `gemini-2.5-flash-tts`
-* `elevenlabs/elevenlabs-tts-v2-5` *(Third-Party)*
+Google Agent Platform hosts Anthropic's Claude models. The API differs slightly from the direct Anthropic API:
 
-**Example (Using ElevenLabs via Google Agent Platform):**
+- `model` is **not** a valid parameter — the model is specified in the endpoint URL.
+- `anthropic_version` is **required** and must be set to `vertex-2023-10-16`.
+
+Use `claudeMessages()` for a clean interface, or `predict()` with a raw payload.
+
+### Available Claude Models
+
+| Model ID (for SDK) | Full Publisher Path |
+|---|---|
+| `anthropic/claude-sonnet-4-6` | `publishers/anthropic/models/claude-sonnet-4-6` |
+| `anthropic/claude-opus-4-6` | `publishers/anthropic/models/claude-opus-4-6` |
+
+### Claude Sonnet 4.6 — Example
 
 ```php
-$ttsPayload = [
-    // Consult the specific model documentation for the exact payload schema
-    "text" => "Hello, welcome to the Agent Platform." 
-];
+$client = new Client([
+    'project_id'   => 'your-gcp-project-id',
+    'access_token' => 'YOUR_ACCESS_TOKEN',
+    'location'     => 'us-east5'
+]);
 
-// Provide the publisher prefix (elevenlabs/) to route correctly
-$audioResponse = $client->predict(
-    $ttsPayload, 
-    'elevenlabs/elevenlabs-tts-v2-5'
+$response = $client->claudeMessages(
+    messages: [
+        ['role' => 'user', 'content' => 'Give me a banana bread recipe.']
+    ],
+    modelId: 'anthropic/claude-sonnet-4-6',
+    maxTokens: 1024
+);
+
+// $response['content'][0]['text'] contains the reply
+print_r($response);
+```
+
+Expected response shape:
+
+```json
+{
+  "id": "msg_01AbCdEfGhIjKlMnOpQrStUv",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Here's a delicious banana bread recipe: ..."
+    }
+  ],
+  "model": "claude-sonnet-4-6",
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 184
+  }
+}
+```
+
+### Claude Opus 4.6 — Example
+
+```php
+$response = $client->claudeMessages(
+    messages: [
+        ['role' => 'user', 'content' => 'Explain quantum entanglement simply.']
+    ],
+    modelId: 'anthropic/claude-opus-4-6',
+    maxTokens: 2048
 );
 ```
+
+### Streaming Claude Responses
+
+```php
+$response = $client->claudeMessages(
+    messages: [
+        ['role' => 'user', 'content' => 'Write a short story.']
+    ],
+    modelId: 'anthropic/claude-sonnet-4-6',
+    maxTokens: 1024,
+    stream: true
+);
+```
+
+---
+
+## Video Generation — Veo 3.1
+
+Veo 3.1 uses a **long-running operation** pattern: you submit a job and then poll until it completes.
+
+### Available Veo Models
+
+| Model ID (for SDK) | Full Publisher Path |
+|---|---|
+| `google/veo-3.1-generate-001` | `publishers/google/models/veo-3.1-generate-001` |
+
+### Generate a Video
+
+```php
+$client = new Client([
+    'project_id'   => 'your-gcp-project-id',
+    'access_token' => 'YOUR_ACCESS_TOKEN',
+    'location'     => 'us-central1'
+]);
+
+// Step 1: Submit the generation job
+$operation = $client->generateVideo(
+    prompt: 'A timelapse of a sunflower blooming in a garden.',
+    modelId: 'google/veo-3.1-generate-001',
+    sampleCount: 1,
+    outputStorageUri: 'gs://your-bucket/output/' // optional
+);
+
+$operationName = $operation['name']; // e.g. "projects/.../operations/123"
+
+// Step 2: Poll until done
+do {
+    sleep(5);
+    $status = $client->getOperation($operationName);
+} while (empty($status['done']));
+
+print_r($status['response']);
+```
+
+### Advanced Veo Parameters
+
+```php
+$operation = $client->generateVideo(
+    prompt: 'Aerial drone shot of a mountain range at sunrise.',
+    modelId: 'google/veo-3.1-generate-001',
+    sampleCount: 2,
+    outputStorageUri: 'gs://your-bucket/output/',
+    additionalParams: [
+        'generateAudio' => true,
+        'durationSeconds' => 8
+    ]
+);
+```
+
+---
+
+## Text-to-Speech (TTS)
+
+Google Agent Platform acts as a hub for multiple publishers. The SDK automatically routes to the correct publisher endpoint.
+
+### Available TTS Models
+
+| Model ID (for SDK) | Description |
+|---|---|
+| `gemini-3.1-flash-tts-preview` | Low-latency, controllable single- and multi-speaker TTS. Supports style control via natural language prompts (accents, tone, whisper, emotions). |
+| `gemini-2.5-pro-tts` | High-quality TTS via Gemini 2.5 Pro |
+| `gemini-2.5-flash-tts` | Fast TTS via Gemini 2.5 Flash |
+| `elevenlabs/elevenlabs-tts-v2-5` | Third-party ElevenLabs TTS |
+
+**Gemini 3.1 Flash TTS Preview** supports:
+- Natural conversation with very low latency
+- Style control via prompts (accents, tone, whisper, emotions)
+- Dynamic performance for poetry, newscasts, storytelling
+- Enhanced pace and pronunciation control
+
+### TTS Example
+
+```php
+$audioResponse = $client->predict(
+    payload: [
+        'text'         => 'Hello, welcome to the Agent Platform.',
+        'voiceConfig'  => ['prebuiltVoiceConfig' => ['voiceName' => 'en-US-Standard-A']],
+        'stylePrompt'  => 'Speak in a calm, friendly tone with a slight British accent.'
+    ],
+    modelId: 'gemini-3.1-flash-tts-preview'
+);
+```
+
+### ElevenLabs via Agent Platform
+
+```php
+$audioResponse = $client->predict(
+    payload: [
+        'text' => 'Hello, welcome to the Agent Platform.'
+    ],
+    modelId: 'elevenlabs/elevenlabs-tts-v2-5'
+);
+```
+
+---
+
+## Model Reference
+
+| Model ID (for SDK) | Type | Notes |
+|---|---|---|
+| `gemini-3.1-flash-lite-preview` | Text | **Default model** |
+| `gemini-3.1-pro-preview` | Text | High capability |
+| `gemini-3.1-flash-tts-preview` | TTS | Low-latency audio |
+| `gemini-2.5-pro-tts` | TTS | |
+| `gemini-2.5-flash-tts` | TTS | |
+| `anthropic/claude-sonnet-4-6` | Text | Requires Cloud Mode |
+| `anthropic/claude-opus-4-6` | Text | Requires Cloud Mode |
+| `google/veo-3.1-generate-001` | Video | Long-running operation |
+| `elevenlabs/elevenlabs-tts-v2-5` | TTS | Third-party |
+
+---
+
+## About Google Agent Platform (formerly Vertex AI)
+
+Google Agent Platform was formerly known as **Vertex AI**. The rebrand reflects Google's strategic shift toward agentic AI — systems that can plan, reason, and act autonomously. The underlying infrastructure and all Vertex AI API endpoints remain fully compatible. If you have existing code using Vertex AI endpoints, it will continue to work without changes.
