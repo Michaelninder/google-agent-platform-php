@@ -1,0 +1,18 @@
+{
+    "name": "fabianternis/google-agent-platform-php",
+    "description": "A lightweight, dependency-free PHP wrapper for the Google Gemini Enterprise Agent Platform.",
+    "type": "library",
+    "license": "Apache-2.0",
+    "autoload": {
+        "psr-4": {
+            "Fabianternis\\GoogleAgentPlatform\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Fabian Ternis",
+            "email": "f.ternis@xpsystems.eu"
+        }
+    ],
+    "require": {}
+}
