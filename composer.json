@@ -1,6 +1,6 @@
 {
     "name": "fabianternis/google-agent-platform-php",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": "A lightweight, dependency-free PHP wrapper for the Google Agent Platform (formerly Vertex AI) — supports Gemini, Claude (Anthropic), Veo video generation, and TTS models.",
     "type": "library",
     "license": "Apache-2.0",

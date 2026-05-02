@@ -71,6 +71,134 @@ $response = $client->streamGenerateContent(
 
 ---
 
+## Image Generation — Imagen 3
+
+Generate images from text prompts using Imagen 3. The API returns base64-encoded PNG/JPEG bytes — the SDK decodes them automatically and can save directly to disk.
+
+### Available Imagen Models
+
+| Model ID (for SDK) | Notes |
+|---|---|
+| `imagen-3.0-generate-001` | Highest quality (default) |
+| `imagen-3.0-fast-generate-001` | Faster, lower cost |
+
+### Generate and Save Images
+
+```php
+$client = new Client([
+    'project_id'   => 'your-gcp-project-id',
+    'access_token' => 'YOUR_ACCESS_TOKEN',
+    'location'     => 'us-central1'
+]);
+
+$images = $client->generateImage(
+    prompt:      'A photorealistic red fox sitting in a snowy forest at dusk.',
+    modelId:     'imagen-3.0-generate-001',
+    sampleCount: 2,
+    aspectRatio: '16:9',
+    outputDir:   '/tmp/images'   // saves imagen_<uniqid>.png to this folder
+);
+
+foreach ($images as $img) {
+    echo $img['savedPath'] . PHP_EOL; // e.g. /tmp/images/imagen_6634ab12.png
+}
+```
+
+### Return as Base64 (no file saving)
+
+```php
+$images = $client->generateImage(
+    prompt:      'An oil painting of a lighthouse at sunset.',
+    sampleCount: 1
+    // omit outputDir → base64 string returned instead
+);
+
+$base64png = $images[0]['base64'];
+// e.g. embed in HTML: <img src="data:image/png;base64,{$base64png}">
+```
+
+### Advanced Imagen Parameters
+
+```php
+$images = $client->generateImage(
+    prompt:           'A futuristic city skyline at night.',
+    modelId:          'imagen-3.0-generate-001',
+    sampleCount:      1,
+    aspectRatio:      '9:16',
+    outputDir:        '/tmp/images',
+    additionalParams: [
+        'negativePrompt'    => 'blurry, low quality, cartoon',
+        'personGeneration'  => 'dont_allow',
+    ]
+);
+```
+
+---
+
+## Text-to-Speech (TTS)
+
+TTS models return binary audio data. The SDK handles both raw binary responses and base64-wrapped JSON envelopes automatically, and can save the result directly to a file.
+
+### Available TTS Models
+
+| Model ID (for SDK) | Description |
+|---|---|
+| `gemini-3.1-flash-tts-preview` | **Default** — low latency, style control via prompts |
+| `gemini-2.5-pro-tts` | High-quality TTS |
+| `gemini-2.5-flash-tts` | Fast TTS |
+| `elevenlabs/elevenlabs-tts-v2-5` | Third-party ElevenLabs |
+
+**Gemini 3.1 Flash TTS Preview** supports:
+- Natural conversation with very low latency
+- Style control via natural language prompts (accents, tone, whisper, emotions)
+- Dynamic performance for poetry, newscasts, storytelling
+- Enhanced pace and pronunciation control
+
+### Synthesize and Save to File
+
+```php
+$client = new Client([
+    'api_key' => 'YOUR_API_KEY'
+]);
+
+$audio = $client->synthesizeSpeech(
+    text:        'Hello, welcome to the Agent Platform.',
+    modelId:     'gemini-3.1-flash-tts-preview',
+    voiceConfig: ['prebuiltVoiceConfig' => ['voiceName' => 'en-US-Standard-A']],
+    stylePrompt: 'Speak in a calm, friendly tone with a slight British accent.',
+    outputFile:  '/tmp/speech.mp3'
+);
+
+echo $audio['savedPath'];   // /tmp/speech.mp3
+echo $audio['mimeType'];    // audio/mp3
+```
+
+### Return Raw Audio Bytes (no file saving)
+
+```php
+$audio = $client->synthesizeSpeech(
+    text:    'The quick brown fox jumps over the lazy dog.',
+    modelId: 'gemini-2.5-flash-tts'
+    // omit outputFile → raw bytes returned in $audio['bytes']
+);
+
+// Stream directly to browser
+header('Content-Type: ' . $audio['mimeType']);
+echo $audio['bytes'];
+```
+
+### ElevenLabs via Agent Platform
+
+```php
+$audio = $client->synthesizeSpeech(
+    text:    'Hello from ElevenLabs on Agent Platform.',
+    modelId: 'elevenlabs/elevenlabs-tts-v2-5',
+    extra:   ['voice_id' => 'YOUR_VOICE_ID']
+);
+```
+
+---
+
 ## Anthropic Models (Claude on Agent Platform)
 
 Google Agent Platform hosts Anthropic's Claude models. The API differs slightly from the direct Anthropic API:
@@ -258,17 +386,19 @@ $audioResponse = $client->predict(
 
 ## Model Reference
 
-| Model ID (for SDK) | Type | Notes |
-|---|---|---|
-| `gemini-3.1-flash-lite-preview` | Text | **Default model** |
-| `gemini-3.1-pro-preview` | Text | High capability |
-| `gemini-3.1-flash-tts-preview` | TTS | Low-latency audio |
-| `gemini-2.5-pro-tts` | TTS | |
-| `gemini-2.5-flash-tts` | TTS | |
-| `anthropic/claude-sonnet-4-6` | Text | Requires Cloud Mode |
-| `anthropic/claude-opus-4-6` | Text | Requires Cloud Mode |
-| `google/veo-3.1-generate-001` | Video | Long-running operation |
-| `elevenlabs/elevenlabs-tts-v2-5` | TTS | Third-party |
+| Model ID (for SDK) | Type | Method | Notes |
+|---|---|---|---|
+| `gemini-3.1-flash-lite-preview` | Text | `generateContent()` | **Default model** |
+| `gemini-3.1-pro-preview` | Text | `generateContent()` | High capability |
+| `imagen-3.0-generate-001` | Image | `generateImage()` | Highest quality |
+| `imagen-3.0-fast-generate-001` | Image | `generateImage()` | Faster, lower cost |
+| `gemini-3.1-flash-tts-preview` | TTS | `synthesizeSpeech()` | Low-latency, style control |
+| `gemini-2.5-pro-tts` | TTS | `synthesizeSpeech()` | High quality |
+| `gemini-2.5-flash-tts` | TTS | `synthesizeSpeech()` | Fast |
+| `anthropic/claude-sonnet-4-6` | Text | `claudeMessages()` | Requires Cloud Mode |
+| `anthropic/claude-opus-4-6` | Text | `claudeMessages()` | Requires Cloud Mode |
+| `google/veo-3.1-generate-001` | Video | `generateVideo()` | Long-running operation |
+| `elevenlabs/elevenlabs-tts-v2-5` | TTS | `synthesizeSpeech()` | Third-party |
 
 ---
 
