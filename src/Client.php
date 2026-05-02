@@ -32,6 +32,7 @@ use GoogleAgentPlatform\Resources\VideoResource;
  *   $client->claude->messages([...]);
  *   $client->files->uploadFile('/tmp/photo.jpg');
  *   $client->files->withFile('/tmp/photo.jpg', 'What is this?');
+ *   $client->files->deleteFile('files/abc123');
  *
  *   // Legacy flat API (fully backward-compatible)
  *   $client->generateContent([...]);
@@ -47,22 +48,25 @@ class Client
     // -------------------------------------------------------------------------
 
     /** Gemini text generation */
-    public readonly TextResource  $text;
+    public readonly TextResource   $text;
 
     /** Imagen image generation */
-    public readonly ImageResource $images;
+    public readonly ImageResource  $images;
 
     /** Text-to-Speech synthesis */
-    public readonly AudioResource $audio;
+    public readonly AudioResource  $audio;
 
     /** Veo video generation */
-    public readonly VideoResource $video;
+    public readonly VideoResource  $video;
 
     /** Anthropic Claude models */
     public readonly ClaudeResource $claude;
 
     /** File handling — local embed (inlineData) and File API upload */
-    public readonly FileResource  $files;
+    public readonly FileResource   $files;
+
+    // Keep a direct reference so predict() doesn't need reflection
+    private readonly HttpClient $http;
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -89,14 +93,14 @@ class Client
             );
         }
 
-        $http = new HttpClient($apiKey, $accessToken, $projectId, $location);
+        $this->http   = new HttpClient($apiKey, $accessToken, $projectId, $location);
 
-        $this->text   = new TextResource($http);
-        $this->images = new ImageResource($http);
-        $this->audio  = new AudioResource($http);
-        $this->video  = new VideoResource($http);
-        $this->claude = new ClaudeResource($http);
-        $this->files  = new FileResource($http);
+        $this->text   = new TextResource($this->http);
+        $this->images = new ImageResource($this->http);
+        $this->audio  = new AudioResource($this->http);
+        $this->video  = new VideoResource($this->http);
+        $this->claude = new ClaudeResource($this->http);
+        $this->files  = new FileResource($this->http);
     }
 
     // -------------------------------------------------------------------------
@@ -105,20 +109,37 @@ class Client
 
     /**
      * Standard (non-streaming) content generation.
+     *
+     * @param string|null $systemInstruction  Optional system prompt.
+     * @param array       $generationConfig   Optional params: temperature, maxOutputTokens, etc.
      * @see TextResource::generate()
      */
-    public function generateContent(array $contents, string $modelId = 'gemini-3.1-flash-lite-preview'): array
-    {
-        return $this->text->generate($contents, $modelId);
+    public function generateContent(
+        array   $contents,
+        string  $modelId           = 'gemini-3.1-flash-lite-preview',
+        ?string $systemInstruction = null,
+        array   $generationConfig  = []
+    ): array {
+        return $this->text->generate($contents, $modelId, $systemInstruction, $generationConfig);
     }
 
     /**
      * Streamed content generation.
+     *
+     * @param callable|null $onChunk           fn(array $chunk): void — called per chunk.
+     *                                          If null, all chunks are collected and returned.
+     * @param string|null   $systemInstruction  Optional system prompt.
+     * @param array         $generationConfig   Optional generation parameters.
      * @see TextResource::stream()
      */
-    public function streamGenerateContent(array $contents, string $modelId = 'gemini-3.1-flash-lite-preview'): array
-    {
-        return $this->text->stream($contents, $modelId);
+    public function streamGenerateContent(
+        array     $contents,
+        string    $modelId           = 'gemini-3.1-flash-lite-preview',
+        ?callable $onChunk           = null,
+        ?string   $systemInstruction = null,
+        array     $generationConfig  = []
+    ): array {
+        return $this->text->stream($contents, $modelId, $onChunk, $systemInstruction, $generationConfig);
     }
 
     /**
@@ -193,25 +214,6 @@ class Client
      */
     public function predict(array $payload, string $modelId, string $action = 'predict'): array
     {
-        // Delegate through HttpClient directly for maximum flexibility
-        $http = $this->getHttp();
-        return $http->request($modelId, $action, $payload);
-    }
-
-    // -------------------------------------------------------------------------
-    // Internal
-    // -------------------------------------------------------------------------
-
-    /**
-     * Expose the underlying HttpClient for advanced use cases.
-     * Obtained via reflection on the first resource (they all share the same instance).
-     */
-    private function getHttp(): HttpClient
-    {
-        // All resources hold the same HttpClient instance.
-        // We retrieve it from TextResource via reflection to avoid storing a
-        // redundant reference on Client itself.
-        $ref = new \ReflectionProperty(TextResource::class, 'http');
-        return $ref->getValue($this->text);
+        return $this->http->request($modelId, $action, $payload);
     }
 }

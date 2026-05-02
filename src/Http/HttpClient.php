@@ -2,12 +2,15 @@
 
 namespace GoogleAgentPlatform\Http;
 
+use GoogleAgentPlatform\Exceptions\ApiException;
+use GoogleAgentPlatform\Exceptions\AuthException;
+
 /**
  * Low-level HTTP client.
  *
  * Handles all cURL communication with the Agent Platform API.
  * All higher-level resource classes receive an instance of this class
- * and call request() / requestRaw() / get() as needed.
+ * and call request() / requestRaw() / get() / stream() / delete() as needed.
  */
 class HttpClient
 {
@@ -43,15 +46,16 @@ class HttpClient
         $decoded = \json_decode($raw, true);
 
         if (\json_last_error() !== JSON_ERROR_NONE) {
-            throw new \RuntimeException(
+            throw new ApiException(
                 'Failed to decode API response as JSON. '
                 . 'If this endpoint returns binary data, use requestRaw() instead.'
             );
         }
 
         if (isset($decoded['error'])) {
-            $msg = $decoded['error']['message'] ?? 'Unknown API Error';
-            throw new \RuntimeException("API Error: {$msg}");
+            $msg  = $decoded['error']['message'] ?? 'Unknown API Error';
+            $code = $decoded['error']['code']    ?? 0;
+            $this->throwTypedApiException($msg, (int) $code);
         }
 
         return $decoded;
@@ -71,25 +75,118 @@ class HttpClient
     }
 
     /**
+     * POST to a model endpoint and stream the response via a user-supplied callback.
+     *
+     * The Agent Platform streaming endpoint returns newline-delimited JSON chunks
+     * (server-sent events). Each non-empty line is passed raw to $onChunk so the
+     * caller can parse or forward it incrementally.
+     *
+     * @param string   $modelId
+     * @param string   $action    Typically 'streamGenerateContent' or 'rawPredict'
+     * @param array    $payload
+     * @param callable $onChunk   fn(string $line): void — called for every non-empty line
+     */
+    public function stream(string $modelId, string $action, array $payload, callable $onChunk): void
+    {
+        [$publisher, $model] = $this->resolvePublisher($modelId);
+        $url     = $this->buildModelUrl($publisher, $model, $action);
+        $headers = $this->buildHeaders();
+
+        $ch = \curl_init();
+        \curl_setopt($ch, CURLOPT_URL, $url);
+        \curl_setopt($ch, CURLOPT_POST, true);
+        \curl_setopt($ch, CURLOPT_POSTFIELDS, \json_encode($payload));
+        \curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        \curl_setopt($ch, CURLOPT_RETURNTRANSFER, false); // Do NOT buffer — stream instead
+
+        // Buffer partial lines across chunks
+        $lineBuffer = '';
+
+        \curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use ($onChunk, &$lineBuffer): int {
+            $lineBuffer .= $data;
+
+            // Process all complete lines in the buffer
+            while (($pos = \strpos($lineBuffer, "\n")) !== false) {
+                $line       = \substr($lineBuffer, 0, $pos);
+                $lineBuffer = \substr($lineBuffer, $pos + 1);
+
+                // Strip SSE "data: " prefix if present
+                if (\str_starts_with($line, 'data: ')) {
+                    $line = \substr($line, 6);
+                }
+
+                $line = \trim($line);
+
+                if ($line !== '' && $line !== '[DONE]') {
+                    $onChunk($line);
+                }
+            }
+
+            return \strlen($data); // Must return the number of bytes handled
+        });
+
+        \curl_exec($ch);
+        $httpCode = \curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error    = \curl_error($ch);
+
+        if ($error) {
+            throw new ApiException("cURL stream error: {$error}");
+        }
+
+        if ($httpCode >= 400) {
+            throw new ApiException("API stream error: HTTP {$httpCode}", $httpCode);
+        }
+
+        // Flush any remaining partial line
+        $lineBuffer = \trim($lineBuffer);
+        if ($lineBuffer !== '' && $lineBuffer !== '[DONE]') {
+            $onChunk($lineBuffer);
+        }
+    }
+
+    /**
      * GET a URL and return a decoded JSON array.
      * Used for polling long-running operations.
+     * Appends the API key as a query parameter when in Express Mode.
      */
     public function get(string $url): array
     {
+        // Append API key for Express Mode (Cloud Mode uses the Authorization header)
+        if ($this->apiKey) {
+            $sep = \str_contains($url, '?') ? '&' : '?';
+            $url .= "{$sep}key={$this->apiKey}";
+        }
+
         $headers  = $this->buildHeaders();
         $raw      = $this->execute($url, $headers, null, 'GET');
         $decoded  = \json_decode($raw, true);
 
         if ($decoded === null) {
-            throw new \RuntimeException('Failed to decode GET response as JSON.');
+            throw new ApiException('Failed to decode GET response as JSON.');
         }
 
         if (isset($decoded['error'])) {
-            $msg = $decoded['error']['message'] ?? 'Unknown API Error';
-            throw new \RuntimeException("API Error: {$msg}");
+            $msg  = $decoded['error']['message'] ?? 'Unknown API Error';
+            $code = $decoded['error']['code']    ?? 0;
+            $this->throwTypedApiException($msg, (int) $code);
         }
 
         return $decoded;
+    }
+
+    /**
+     * DELETE a URL. Used by FileResource::deleteFile().
+     * A successful delete returns HTTP 200 with an empty JSON body {}.
+     */
+    public function delete(string $url): void
+    {
+        if ($this->apiKey) {
+            $sep = \str_contains($url, '?') ? '&' : '?';
+            $url .= "{$sep}key={$this->apiKey}";
+        }
+
+        $headers = $this->buildHeaders();
+        $this->execute($url, $headers, null, 'DELETE');
     }
 
     /**
@@ -103,12 +200,13 @@ class HttpClient
         $decoded = \json_decode($raw, true);
 
         if ($decoded === null) {
-            throw new \RuntimeException('Failed to decode upload response as JSON.');
+            throw new ApiException('Failed to decode upload response as JSON.');
         }
 
         if (isset($decoded['error'])) {
-            $msg = $decoded['error']['message'] ?? 'Unknown API Error';
-            throw new \RuntimeException("API Error: {$msg}");
+            $msg  = $decoded['error']['message'] ?? 'Unknown API Error';
+            $code = $decoded['error']['code']    ?? 0;
+            $this->throwTypedApiException($msg, (int) $code);
         }
 
         return $decoded;
@@ -235,8 +333,8 @@ class HttpClient
      *
      * @param string      $url
      * @param string[]    $headers
-     * @param string|null $body     POST body; null for GET
-     * @param string      $method   'GET' or 'POST'
+     * @param string|null $body     POST body; null for GET/DELETE
+     * @param string      $method   'GET', 'POST', or 'DELETE'
      */
     private function execute(string $url, array $headers, ?string $body, string $method): string
     {
@@ -248,6 +346,8 @@ class HttpClient
         if ($method === 'POST') {
             \curl_setopt($ch, CURLOPT_POST, true);
             \curl_setopt($ch, CURLOPT_POSTFIELDS, $body ?? '');
+        } elseif ($method === 'DELETE') {
+            \curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
         }
 
         $response = \curl_exec($ch);
@@ -255,15 +355,27 @@ class HttpClient
         $error    = \curl_error($ch);
 
         if ($error) {
-            throw new \RuntimeException("cURL Error: {$error}");
+            throw new ApiException("cURL Error: {$error}");
         }
 
         if ($httpCode >= 400) {
             $decoded = \json_decode($response, true);
             $msg     = $decoded['error']['message'] ?? "HTTP {$httpCode}";
-            throw new \RuntimeException("API Error ({$httpCode}): {$msg}");
+            $this->throwTypedApiException($msg, $httpCode);
         }
 
         return $response;
+    }
+
+    /**
+     * Throw the most specific exception type based on HTTP status code.
+     */
+    private function throwTypedApiException(string $message, int $httpCode): never
+    {
+        if ($httpCode === 401 || $httpCode === 403) {
+            throw new AuthException("API Error ({$httpCode}): {$message}", $httpCode);
+        }
+
+        throw new ApiException("API Error ({$httpCode}): {$message}", $httpCode);
     }
 }

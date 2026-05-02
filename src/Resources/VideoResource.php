@@ -60,16 +60,8 @@ class VideoResource
     {
         $base = $this->http->getBaseUrl();
         $path = \ltrim($operationName, '/');
+        $url  = "{$base}/{$path}";
 
-        if (\str_starts_with($path, 'projects/')) {
-            // Already a full resource path — use as-is
-            $url = "{$base}/{$path}";
-        } else {
-            $url = "{$base}/{$path}";
-        }
-
-        // Append API key if in Express Mode
-        // (HttpClient::get() handles auth headers for Cloud Mode)
         return $this->http->get($url);
     }
 }
