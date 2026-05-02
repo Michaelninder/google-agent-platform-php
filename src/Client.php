@@ -103,7 +103,9 @@ class Client
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
-        curl_close($ch);
+        
+        // curl_close($ch) removed here! The CurlHandle object will automatically 
+        // destruct and close the connection when the method finishes executing.
 
         if ($error) {
             throw new \RuntimeException("cURL Error: " . $error);
