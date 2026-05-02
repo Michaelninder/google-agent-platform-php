@@ -71,6 +71,76 @@ class HttpClient
     }
 
     /**
+     * POST to a model endpoint and stream the response via a user-supplied callback.
+     *
+     * The Agent Platform streaming endpoint returns newline-delimited JSON chunks
+     * (server-sent events). Each non-empty line is passed raw to $onChunk so the
+     * caller can parse or forward it incrementally.
+     *
+     * @param string   $modelId
+     * @param string   $action    Typically 'streamGenerateContent' or 'rawPredict'
+     * @param array    $payload
+     * @param callable $onChunk   fn(string $line): void — called for every non-empty line
+     */
+    public function stream(string $modelId, string $action, array $payload, callable $onChunk): void
+    {
+        [$publisher, $model] = $this->resolvePublisher($modelId);
+        $url     = $this->buildModelUrl($publisher, $model, $action);
+        $headers = $this->buildHeaders();
+
+        $ch = \curl_init();
+        \curl_setopt($ch, CURLOPT_URL, $url);
+        \curl_setopt($ch, CURLOPT_POST, true);
+        \curl_setopt($ch, CURLOPT_POSTFIELDS, \json_encode($payload));
+        \curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        \curl_setopt($ch, CURLOPT_RETURNTRANSFER, false); // Do NOT buffer — stream instead
+
+        // Buffer partial lines across chunks
+        $lineBuffer = '';
+
+        \curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use ($onChunk, &$lineBuffer): int {
+            $lineBuffer .= $data;
+
+            // Process all complete lines in the buffer
+            while (($pos = \strpos($lineBuffer, "\n")) !== false) {
+                $line       = \substr($lineBuffer, 0, $pos);
+                $lineBuffer = \substr($lineBuffer, $pos + 1);
+
+                // Strip SSE "data: " prefix if present
+                if (\str_starts_with($line, 'data: ')) {
+                    $line = \substr($line, 6);
+                }
+
+                $line = \trim($line);
+
+                if ($line !== '' && $line !== '[DONE]') {
+                    $onChunk($line);
+                }
+            }
+
+            return \strlen($data); // Must return the number of bytes handled
+        });
+
+        \curl_exec($ch);
+        $httpCode = \curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error    = \curl_error($ch);
+
+        if ($error) {
+            throw new \RuntimeException("cURL stream error: {$error}");
+        }
+
+        if ($httpCode >= 400) {
+            throw new \RuntimeException("API stream error: HTTP {$httpCode}");
+        }
+
+        // Flush any remaining partial line
+        $lineBuffer = \trim($lineBuffer);
+        if ($lineBuffer !== '' && $lineBuffer !== '[DONE]') {
+            $onChunk($lineBuffer);
+        }
+    }
+
+    /**
      * GET a URL and return a decoded JSON array.
      * Used for polling long-running operations.
      */

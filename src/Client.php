@@ -115,10 +115,16 @@ class Client
     /**
      * Streamed content generation.
      * @see TextResource::stream()
+     *
+     * @param callable|null $onChunk  fn(array $chunk): void — called per chunk.
+     *                                If null, all chunks are collected and returned.
      */
-    public function streamGenerateContent(array $contents, string $modelId = 'gemini-3.1-flash-lite-preview'): array
-    {
-        return $this->text->stream($contents, $modelId);
+    public function streamGenerateContent(
+        array     $contents,
+        string    $modelId  = 'gemini-3.1-flash-lite-preview',
+        ?callable $onChunk  = null
+    ): array {
+        return $this->text->stream($contents, $modelId, $onChunk);
     }
 
     /**
