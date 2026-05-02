@@ -12,7 +12,7 @@ class Client
 
     /**
      * Initialize the Agent Platform Client.
-     * * Accepts an array with either 'api_key' OR ('access_token', 'project_id').
+     * * Accepts an array with either 'api_key' (Express Mode) OR ('access_token', 'project_id').
      * 'location' defaults to 'global'.
      */
     public function __construct(array $config)
@@ -31,44 +31,64 @@ class Client
 
     /**
      * Standard content generation.
+     * Defaults to 'gemini-3.1-flash-lite-preview'
      */
-    public function generateContent(string $modelId, array $contents): array
+    public function generateContent(array $contents, string $modelId = 'gemini-3.1-flash-lite-preview'): array
     {
         return $this->request($modelId, 'generateContent', ['contents' => $contents]);
     }
 
     /**
      * Streamed content generation.
+     * Defaults to 'gemini-3.1-flash-lite-preview'
      */
-    public function streamGenerateContent(string $modelId, array $contents): array
+    public function streamGenerateContent(array $contents, string $modelId = 'gemini-3.1-flash-lite-preview'): array
     {
         return $this->request($modelId, 'streamGenerateContent', ['contents' => $contents]);
     }
 
     /**
-     * Core request handler.
+     * Send a raw prediction/generation request (Useful for TTS and non-standard endpoints).
+     */
+    public function predict(array $payload, string $modelId, string $action = 'predict'): array
+    {
+        return $this->request($modelId, $action, $payload);
+    }
+
+    /**
+     * Core request handler. Supports dynamic publishers (e.g., Google vs ElevenLabs).
      */
     private function request(string $modelId, string $action, array $payload): array
     {
+        // Dynamically resolve the publisher (Google is default)
+        $publisher = 'google';
+        $model = $modelId;
+        
+        if (strpos($modelId, '/') !== false) {
+            [$publisher, $model] = explode('/', $modelId, 2);
+        }
+
         $ch = curl_init();
         $headers = ['Content-Type: application/json'];
 
-        // Determine Endpoint and Auth Headers based on config
+        // Determine Endpoint and Auth Headers based on config (Express vs Cloud mode)
         if ($this->apiKey) {
             $url = sprintf(
-                "%s/publishers/google/models/%s:%s?key=%s",
+                "%s/publishers/%s/models/%s:%s?key=%s",
                 $this->baseUrl,
-                $modelId,
+                $publisher,
+                $model,
                 $action,
                 $this->apiKey
             );
         } else {
             $url = sprintf(
-                "%s/projects/%s/locations/%s/publishers/google/models/%s:%s",
+                "%s/projects/%s/locations/%s/publishers/%s/models/%s:%s",
                 $this->baseUrl,
                 $this->projectId,
                 $this->location,
-                $modelId,
+                $publisher,
+                $model,
                 $action
             );
             $headers[] = 'Authorization: Bearer ' . $this->accessToken;
